@@ -95,7 +95,7 @@ class clsProjs_x_Rates extends clsTable_abstract {
 	    foreach ($arPS as $idx => $idP) {
 		$arP = $arPR[$idP];
 		$rcP->Values($arP);
-		$out .= '<th>'.$rcP->AdminLink($rcP->Value('InvcPfx'),$rcP->Value('Name')).'</th>';
+		$out .= '<th>'.$rcP->SelfLink($rcP->Value('InvcPfx'),$rcP->Value('Name')).'</th>';
 	    }
 	}
 /* OLD VERSION
@@ -103,7 +103,7 @@ class clsProjs_x_Rates extends clsTable_abstract {
 	if ($oPrjs->HasRows()) {
 	    $out .= '<th>Projects:</th>';
 	    while ($oPrjs->NextRow()) {
-		$out .= '<th>'.$oPrjs->AdminLink($oPrjs->Value('InvcPfx'),$oPrjs->Value('Name')).'</th>';
+		$out .= '<th>'.$oPrjs->SelfLink($oPrjs->Value('InvcPfx'),$oPrjs->Value('Name')).'</th>';
 	    }
 	}
 */

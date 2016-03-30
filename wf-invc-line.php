@@ -7,6 +7,8 @@
       This fixes the bug where rates weren't being set.
 */
 class clsWFInvcLines extends clsTable_key_single {
+    use ftLinkableTable;
+
     public function __construct($iDB) {
 	parent::__construct($iDB);
 	  $this->Name('invc_line');
@@ -35,7 +37,7 @@ class clsWFInvcLine extends cDataRecord_MW {
     /*----
       ACTION: Populate the current Invoice Line record with data adapted from the given Session array
     */
-    public function CopySession(clsWFSession $rcSess) {
+    public function CopySession(wfcSession $rcSess) {
 
 	$this->Value('CostLine'	,$rcSess->CostLine_stored());
 	$this->Value('LineDate'	,$rcSess->WhenStart_raw());
@@ -82,7 +84,7 @@ class clsWFInvcLine extends cDataRecord_MW {
 	}
 	$this->CloseLine();	// close out any remaining sessions
     }
-    public function AddSession(clsWFSession $rcSess) {
+    public function AddSession(wfcSession $rcSess) {
 	// if session needs a new line, write the old line and start a new one
 	if (!$this->SameLine($rcSess)) {
 	    $this->CloseLine();
@@ -138,14 +140,14 @@ class clsWFInvcLine extends cDataRecord_MW {
 	    $this->UpdateSession($rcSess);
 	}
     }
-    protected function UpdateSession(clsWFSession $rcSess) {
+    protected function UpdateSession(wfcSession $rcSess) {
 	$arUpd = array(
 	    'ID_Invc'		=> $this->InvoiceID(),
 	    'ID_InvcLine'	=> $this->KeyValue()
 	    );
 	$rcSess->Update($arUpd);
     }
-    protected function SameLine(clsWFSession $rcSess) {
+    protected function SameLine(wfcSession $rcSess) {
 	  $idRateThis = $rcSess->Value('ID_Rate');
 	  $sDateThis = $rcSess->WhenStart_text();
 
@@ -207,7 +209,7 @@ class clsWFInvcLine extends cDataRecord_MW {
 	2011-12-04 written
     */
     protected function SessionsTable() {
-	return $this->Engine()->Make('clsWFSessions');
+	return $this->Engine()->Make('wfcSessions');
     }
 
     // -- DATA TABLES ACCESS -- //
@@ -258,16 +260,17 @@ class clsWFInvcLine extends cDataRecord_MW {
 	to be a fully-populated ILine recordset object.
     */
     public function Create() {
-	$arIns = $this->Values();
+	//$arIns = $this->Values();	// 2016-03-30 What was this for? Gets completely overwritten...
+	$db = $this->Engine();
 	$arIns = array(
 	    'ID_Invc'	=> $this->InvoiceID(),
 	    'Seq'	=> $this->Value('Seq'),
-	    'LineDate'	=> SQLValue($this->Value('LineDate')),
+	    'LineDate'	=> $db->SanitizeAndQuote($this->Value('LineDate')),
 	    'WhenVoid'	=> 'NULL',
-	    'What'	=> SQLValue($this->Value('What')),
+	    'What'	=> $db->SanitizeAndQuote($this->Value('What')),
 	    'Qty'	=> $this->Value('Qty'),
-	    'Unit'	=> SQLValue($this->Value('Unit')),
-	    'Rate'	=> SQLValue($this->Value('Rate')),
+	    'Unit'	=> $db->SanitizeAndQuote($this->Value('Unit')),
+	    'Rate'	=> $db->SanitizeAndQuote($this->Value('Rate')),
 	    'CostLine'	=> $this->Value('CostLine'),
 	    'CostBal'	=> $this->Value('CostBal'),
 	    //'Notes`      VARCHAR(255) DEFAULT NULL COMMENT "human-entered notes",
@@ -460,7 +463,7 @@ class clsWFInvcLine extends cDataRecord_MW {
 
 		    $ar = $this->Values();
 
-		    $ftID = $this->AdminLink();
+		    $ftID = $this->SelfLink();
 		    $txtSeq = $ar['Seq'];
 		    if ($doRen) {
 			if ($txtSeq == $intSeq) {
@@ -539,7 +542,7 @@ class clsWFInvcLine extends cDataRecord_MW {
 				unset($arSess[$idSess]);
 				$intSeq = $obj->Value('Seq');
 				$htSeq = ($intSeq > 0)?($intSeq.'. '):'';
-				$htLine = $htSeq.' ('.$obj->AdminLink().') '.$obj->Value('TimeTotal').'m/'.$obj->Value('CostLine').': '.$obj->Value('Descr');
+				$htLine = $htSeq.' ('.$obj->SelfLink().') '.$obj->Value('TimeTotal').'m/'.$obj->Value('CostLine').': '.$obj->Value('Descr');
 
 				$out .= "\n<tr style=\"$wtStyle\">"
 				  ."\n<td bgcolor=blue></td><td colspan=".($qCols-1).">$htLine</td></tr>";
@@ -627,8 +630,7 @@ class clsWFInvcLine extends cDataRecord_MW {
 	} else {
 	    $sPopup = 'immediately VOID the invoice line and mark its sessions as not invoiced';
 	    $arLink['do'] = 'void';
-//	    $htVoidNow = ' ['.$vgOut->SelfLink($arLink,'void now',$sPopup).']';
-	    $htVoidNow = ' ['.$this->AdminLink('void now',$sPopup,$arLink).']';
+	    $htVoidNow = ' ['.$this->SelfLink('void now',$sPopup,$arLink).']';
 	}
 
 	// render the form
@@ -642,12 +644,12 @@ class clsWFInvcLine extends cDataRecord_MW {
 	$oTplt = $this->PageTemplate();
 	$arCtrls = $frmEdit->RenderControls($doEdit);
 	  // custom vars
-	  $arCtrls['ID'] = $this->AdminLink();
+	  $arCtrls['ID'] = $this->SelfLink();
 	  $arCtrls['!DoVoid'] = $htVoidNow;
 
 	if (!$doEdit) {
 	    $rcInvc = $this->InvoiceRecord();
-	    $arCtrls['ID_Invc'] = $rcInvc->AdminLink_name();
+	    $arCtrls['ID_Invc'] = $rcInvc->SelfLink_name();
 	}
 
 	$oTplt->VariableValues($arCtrls);
@@ -710,7 +712,7 @@ class clsWFInvcLine extends cDataRecord_MW {
 	    $htNotes	= $objForm->RenderControl('Notes');
 	} else {
 	    $objInvc = $this->InvoiceRecord();
-	    $htInvc = $objInvc->AdminLink($objInvc->Value('InvcNum'));
+	    $htInvc = $objInvc->SelfLink($objInvc->Value('InvcNum'));
 	    $htSeq = $htvSeq;
 	    $htDate = $strDate;
 	    $htVoid = $htvVoid;
@@ -725,9 +727,9 @@ class clsWFInvcLine extends cDataRecord_MW {
 
 	$htVoid .= $htVoidNow;
 
-	$htID = $this->AdminLink();
+	$htID = $this->SelfLink();
 
-//	$rcRate = $this->RateObj();	// TO BE WRITTEN
+//	$rcRate = $this->RateRecord();	// TO BE WRITTEN
 //	if (!$rcRate->isLineItem()) {
 	    // only show this if total is based on a rate calculation
 	    if ($doShowCalc) {

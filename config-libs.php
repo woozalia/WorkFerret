@@ -21,4 +21,7 @@ $om = new clsModule(__FILE__, 'wf-rate.php');
 //  $om->AddFunc('SQLValue');
 //  $om->AddFunc('NzArray');
 $om = new clsModule(__FILE__, 'wf-sess.php');
-  $om->AddClass('clsWFSessions');
+  $om->AddClass('wfcSessions');
+$om = new clsModule(__FILE__, 'wf-sess-form.php');
+  $om->AddClass('wfcForm_Session_page');
+  $om->AddClass('wfcForm_Session_line');

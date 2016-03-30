@@ -13,22 +13,9 @@ if (!defined('KS_CHAR_URL_ASSIGN')) {
 }
 
 class SpecialWorkFerret extends SpecialPageApp {
-//=======
-// STATIC
-    private static $objDb;
-
-    public static function DB() {
-	if (!isset(self::$objDb)) {
-	    self::$objDb = new clsWorkFerretData(KS_DB_WORKFERRET);
-	    self::$objDb->Open();
-	}
-	return self::$objDb;
-    }
-
-//=======
-// DYNAMIC
-
     protected $args;
+
+    // ++ SETUP ++ //
 
     public function __construct() {
 	global $wgMessageCache,$wgUser;
@@ -43,6 +30,22 @@ class SpecialWorkFerret extends SpecialPageApp {
         //$wgMessageCache->addMessage('workferret', 'WorkFerret time billing');
 	$vgUserName = 'wiki:'.$wgUser->getName();
     }
+
+    // -- SETUP -- //
+    // ++ CEMENT ++ //
+
+    private $objDb;
+    public function DB() {
+	if (!isset($this->objDb)) {
+	    $this->objDb = new clsWorkFerretData(KS_DB_WORKFERRET);
+	    $this->objDb->Open();
+	}
+	return $this->objDb;
+    }
+
+    // -- CEMENT -- //
+    // ++ MW CALLBACK ++ //
+
     function execute( $par ) {
 	global $wgUser;
 
@@ -54,11 +57,16 @@ class SpecialWorkFerret extends SpecialPageApp {
 		$this->doUser();
 	}
     }
+
+    // -- MW CALLBACK -- //
+    // ++ INTERNAL ENTRY POINTS ++ //
+
     /*-----
       PURPOSE: do stuff that only admins are allowed to do
     */
     public function doAdmin() {
 	global $wgOut;
+
 	if (isset($this->args['page'])) {
 	    $page = $this->args['page'];
 	} else {
@@ -66,7 +74,8 @@ class SpecialWorkFerret extends SpecialPageApp {
 	}
 // display menu
 	//$wtSelf = 'Special:'.$this->name();
-	$wtSelf = $this->getFullTitle();
+	//$wtSelf = $this->getFullTitle();
+	$wtSelf = $this->Page()->BaseURL_rel();
 
 	$objMenu = new clsMenu($wtSelf);
 	$objMenu->Add($objRow = new clsMenuRow('Choose','menu.top'));
@@ -74,12 +83,15 @@ class SpecialWorkFerret extends SpecialPageApp {
 	  $objRow->Add(new clsMenuItem('rates','rate'));
 	  $objRow->Add(new clsMenuItem('invoices','invc'));
 
-	$out = $objMenu->WikiText($page);
+	$out = $objMenu->Render($page);
 	$out .= $objMenu->Execute();
 
-	$wgOut->addHTML('<table style="background: #ccffcc;"><tr><td>');
-	$wgOut->addWikiText($out,TRUE);	$out = '';
-	$wgOut->addHTML('</td></tr></table>');
+	$wgOut->addHTML(
+            '<table style="background: #ccffcc;"><tr><td>'
+            .$out
+            .'</td></tr></table>'
+            );
+        $out = NULL;
 
 	if (!is_null($page)) {
 	    $db = self::DB();
@@ -115,17 +127,20 @@ class SpecialWorkFerret extends SpecialPageApp {
 		    $out .= $objRow->AdminPage();
 		}
 	    }
-	    $wgOut->AddWikiText($out,TRUE);
+	    $wgOut->AddHTML($out);
 	}
     }
-/*
+    /*----
 	PURPOSE: do only stuff that regular users are allowed to do
-*/
+    */
     public function doUser() {
 	global $wgOut;
 
 	$wgOut->AddWikiText('Hello regular user! I haven\'t written anything for you yet, but eventually.');
     }
+
+    // -- INTERNAL ENTRY POINTS -- //
+
 }
 
 class clsWorkFerretData extends clsDatabase {
@@ -161,7 +176,7 @@ class clsWorkFerretData extends clsDatabase {
 	return $this->Make('clsWFRates');
     }
     public function Sessions() {
-	return $this->Make('clsWFSessions');
+	return $this->Make('wfcSessions');
     }
     public function ProjsXRates() {
 	return $this->Make('clsProjs_x_Rates');

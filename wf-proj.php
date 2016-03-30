@@ -6,6 +6,8 @@
 */
 
 class clsWFProjects extends clsTable_key_single {
+    use ftLinkableTable;
+
     public function __construct($iDB) {
 	parent::__construct($iDB);
 	  $this->Name('project');
@@ -106,18 +108,13 @@ class clsWFProjects extends clsTable_key_single {
 //class clsWFProject extends clsRecs_key_single {
 class clsWFProject extends cDataRecord_MW {
 
-    // ++ BOILERPLATE ++ //
-/*
-    public function AdminLink($iText=NULL,$iPopup=NULL,array $iarArgs=NULL) {
-	return clsMenuData_helper::_AdminLink($this,$iText,$iPopup,$iarArgs);
+    // ++ BOILERPLATE AUXILIARY ++ //
+
+    public function SelfLink_name() {
+	return $this->SelfLink($this->NameString());
     }
-    public function AdminRedirect(array $iarArgs=NULL) {
-	return clsMenuData_helper::_AdminRedirect($this,$iarArgs);
-    }
-    public function StartEvent(array $iArgs) { }	// stubbed off for now
-    public function FinishEvent(array $iArgs=NULL) { }	// stubbed off for now
-*/
-    // -- BOILERPLATE -- //
+
+    // -- BOILERPLATE AUXILIARY -- //
     // ++ STATUS ACCESS ++ //
 
     public function IsActive() {
@@ -132,6 +129,21 @@ class clsWFProject extends cDataRecord_MW {
     }
     public function HasRateDefault() {
 	return !is_null($this->RateID());
+    }
+    public function NextSessSeq() {
+	$t = $this->SessionTable();
+	$sqlTbl = $t->NameSQL();
+	$idProj = $this->KeyValue();
+	$sql = "SELECT Seq FROM $sqlTbl WHERE ID_Proj=$idProj ORDER BY Seq DESC LIMIT 1";
+
+	$rc = $t->Engine()->DataSet($sql,'clsRecs_generic');
+	if ($rc->HasRows()) {
+	    $rc->FirstRow();
+	    $seq = $rc->Value('Seq');
+	} else {
+	    $seq = 0;
+	}
+	return $seq+1;
     }
 
     // -- STATUS ACCESS -- //
@@ -156,8 +168,13 @@ class clsWFProject extends cDataRecord_MW {
 	    return $htNone;
 	}
     }
-    public function Text_forList() {
+    //public function Text_forList() {
+    public function ListItem_Text() {
 	return $this->NameString();
+    }
+    // CALLBACK used by fcFormControl_HTML_DropDown::RenderValue()
+    public function ListItem_Link() {
+	return $this->SelfLink_name();
     }
 
     // -- FIELDS ACCESS -- //
@@ -212,7 +229,7 @@ class clsWFProject extends cDataRecord_MW {
 	return $this->Engine()->Make('clsWFRates',$id);
     }
     protected function SessionTable($id=NULL) {
-	return $this->Engine()->Make('clsWFSessions',$id);
+	return $this->Engine()->Make('wfcSessions',$id);
     }
     protected function InvoiceTable($id=NULL) {
 	return $this->Engine()->Make('clsWFInvoices',$id);
@@ -251,7 +268,7 @@ class clsWFProject extends cDataRecord_MW {
 	    while ($rs->NextRow()) {
 		$sName = $rs->NameString();
 		$sTwig = $rs->IsActive()?"<b>$sName</b>":"<i>$sName</i>";	// italicize if inactive
-		$ftTwig = $rs->AdminLink($sTwig,'edit '.$sTwig);
+		$ftTwig = $rs->SelfLink($sTwig,'edit '.$sTwig);
 		$out .=
 		  "\n<li>$sIndent$ftTwig</li>"
 		  .$rs->DrawTree($nLevel);
@@ -365,7 +382,7 @@ class clsWFProject extends cDataRecord_MW {
 	//$strIPfx = $this->Value('InvcPfx');
 	if ($this->HasParent()) {
 	    $rcParent = $this->ParentObj();
-	    $htParent = $rcParent->AdminLink($objParent->Value('Name'));
+	    $htParent = $rcParent->SelfLink($objParent->Value('Name'));
 	} else {
 	    $htParent = '<i>none</i>';
 	}
@@ -376,7 +393,7 @@ class clsWFProject extends cDataRecord_MW {
 	    $htNextInvc = "<tr><td align=right><b>Invc seq</b>:</td><td>$nNextInvc</td></tr>";
 	}
 
-	$arCtrls['ID'] = $this->AdminLink();
+	$arCtrls['ID'] = $this->SelfLink();
 	$arCtrls['ID_Parent'] = $htParent;
 	$arCtrls['!NextInvc'] = $htNextInvc;
 
@@ -408,12 +425,12 @@ class clsWFProject extends cDataRecord_MW {
 		$htPNotes = htmlspecialchars($sPNotes);
 	    }
 	}
-	$htID = $this->AdminLink();
+	$htID = $this->SelfLink();
 	if (is_null($this->Value('ID_Parent'))) {
 	    $htParent = '<i>none</i>';
 	} else {
 	    $objParent = $this->ParentObj();
-	    $htParent = $objParent->AdminLink($objParent->Value('Name'));
+	    $htParent = $objParent->SelfLink($objParent->Value('Name'));
 	}
 
 	$out .= '<table>';
@@ -448,19 +465,8 @@ class clsWFProject extends cDataRecord_MW {
 
 	$idProj = $this->KeyValue();
 
-	$objSQL = new clsSQLFilt('AND');
-	$objSQL->AddCond('ID_Proj='.$idProj);
-
-	// TODO: prevent ID_InvcLine from being saved as "0" when "NONE" is selected
-	if ($iShowInvcd) {
-	    $objSQL->AddCond('(ID_InvcLine IS NOT NULL) AND (ID_InvcLine != 0)');
-	} else {
-	    $objSQL->AddCond('(ID_InvcLine IS NULL) OR (ID_InvcLine=0)');
-	}
-	$sqlFilt = $objSQL->RenderFilter();
-
-	$tSess = $this->Engine()->Sessions();
-	$rsSess = $tSess->GetData($sqlFilt,NULL,'WhenStart,IFNULL(Sort,1000),Seq');
+	$tSess = $this->SessionTable();
+	$rsSess = $tSess->Records_forProject($idProj,$iShowInvcd);
 
 // set up formatting and emit section header:
 	$strCtxt = $vgPage->Arg('context');
@@ -482,7 +488,7 @@ class clsWFProject extends cDataRecord_MW {
 	  'rate'	=> $this->RateID()	// default rate
 	  );
       // show "Sessions" subheader
-	$out = clsWFSession::SectionHdr($arArgs);
+	$out = wfcSession::SectionHdr($arArgs);
 	$doForm = $arArgs['doForm'];
       // show the list of sessions
 	$out .= $rsSess->AdminList($arArgs);
@@ -511,32 +517,32 @@ class clsWFProject extends cDataRecord_MW {
     private $frmPage;
     private function PageForm() {
 	if (empty($this->frmPage)) {
-	    $oForm = new fcForm_DB($this->Table()->ActionKey(),$this);
+	    $oForm = new fcForm_DB($this);
 
 	      $oField = new fcFormField_Text($oForm,'Name');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>20));
+		$oCtrl = new fcFormControl_HTML($oField,array('size'=>20));
 
               $oField = new fcFormField_Num($oForm,'ID_Parent');
-		$oCtrl = new fcFormControl_HTML_DropDown($oForm,$oField,array());
+		$oCtrl = new fcFormControl_HTML_DropDown($oField,array());
 		// TODO: set $oCtrl->Records() to recordset of all Projects except current one
 
               $oField = new fcFormField_Num($oForm,'ID_Rate');
-		$oCtrl = new fcFormControl_HTML_DropDown($oForm,$oField,array());
+		$oCtrl = new fcFormControl_HTML_DropDown($oField,array());
                 $oCtrl->Records($this->RateRecords());
                 $oCtrl->NoDataString('none available');
 
               $oField = new fcFormField_Text($oForm,'InvcPfx');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>4));
+		$oCtrl = new fcFormControl_HTML($oField,array('size'=>4));
 
 	      $oField = new fcFormField_Bit($oForm,'isActive');
-		$oCtrl = new fcFormControl_HTML_CheckBox($oForm,$oField,array());
+		$oCtrl = new fcFormControl_HTML_CheckBox($oField,array());
 		  $oCtrl->DisplayStrings(
 		    '<font color=green>active</font>',
 		    '<font color=grey>inactive</font>'
 		    );
 
               $oField = new fcFormField_Text($oForm,'Notes');
-		$oCtrl = new fcFormControl_HTML_TextArea($oForm,$oField,array('rows'=>4,'cols'=>60));
+		$oCtrl = new fcFormControl_HTML_TextArea($oField,array('rows'=>4,'cols'=>60));
 
 	    $this->frmPage = $oForm;
 	}
@@ -601,18 +607,23 @@ __END__;
 	$tSess = $this->Engine()->Sessions();
 	$nChg = 0;
 
+	$rsSess = $tSess->SpawnItem();
+	$rsSess->ProjectID($this->KeyValue());
+
 	if ($wgRequest->getBool('btnSaveSess')) {
 
 	    // SAVE NEW SESSION
 
-	    $nChg = $tSess->AdminSave($this->KeyValue());
+	    $nChg = $rsSess->EditSave_line();
+	    $this->SelfRedirect();
 	}
 
 	if ($wgRequest->getBool('btnFinishSess')) {
 
 	    // FINISH NEW SESSION (save with end at current time)
 
-	    $nChg = $tSess->AdminFinish($this->KeyValue());
+	    $nChg = $rsSess->EditFinish_line();
+	    $this->SelfRedirect();
 	}
 
 	if ($wgRequest->getBool('btnInvc')) {
@@ -697,7 +708,7 @@ __END__;
 	    }
 	    $rcInvc = $this->InvoiceTable($id);	// get the target invoice
 	    $sInvcNum = $rcInvc->Value('InvcNum');
-	    $out = $strAction.$rcInvc->AdminLink($sInvcNum);
+	    $out = $strAction.$rcInvc->SelfLink($sInvcNum);
 	    $wgOut->addHTML($out);	$out = '';
 
 	    $idSessInvc = $wgRequest->GetIntOrNull('SessInv');
@@ -731,7 +742,7 @@ __END__;
 	    while ($objRows->NextRow()) {
 		$strName = $objRows->Value('Name');
 		$strTwig = $objRows->IsActive()?"<b>$strName</b>":"<i>$strName</i>";	// italicize if inactive
-		$ftTwig = $objRows->AdminLink($strTwig,'edit '.$strTwig);
+		$ftTwig = $objRows->SelfLink($strTwig,'edit '.$strTwig);
 		$out .= "\n$strIndent$ftTwig";
 		$out .= $objRows->DrawTree($intLevel);
 	    }

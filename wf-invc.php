@@ -4,7 +4,11 @@
   HISTORY:
     2013-11-08 split off from WorkFerret.main
 */
+
+define('KS_CLASS_PROJECTS','clsWFProjects');
+
 class clsWFInvoices extends clsTable_key_single {
+    use ftLinkableTable;
 
     // ++ SETUP ++ //
 
@@ -17,6 +21,13 @@ class clsWFInvoices extends clsTable_key_single {
     }
 
     // -- SETUP -- //
+    // ++ DATA TABLES ACCESS ++ //
+
+    protected function ProjectTable($id=NULL) {
+	return $this->Engine()->Make(KS_CLASS_PROJECTS,$id);
+    }
+
+    // -- DATA TABLES ACCESS -- //
     // ++ ACTIONS ++ //
 
     /*-----
@@ -29,22 +40,26 @@ class clsWFInvoices extends clsTable_key_single {
     */
     public function Create($idProj,$sNotes) {
 	// get invoice sequencing information and generate the invoice number:
+	if (empty($idProj)) {
+	    throw new exception('Internal Error: Trying to create invoice for unspecified project.');
+	}
 	$nSeq = $this->NextInvoiceSeq($idProj);
 	$idNext = $this->NextID();
-	$objProj = $this->ProjectTable($idProj);
-	$strPfx = $objProj->Value('InvcPfx');
+	$rcProj = $this->ProjectTable($idProj);
+	$strPfx = $rcProj->Value('InvcPfx');
 	$strInvcNum = sprintf('%1$05u-%2$s-%3$04u',$idNext,$strPfx,$nSeq);
 
 	// create the new invoice record
+	$db = $this->Engine();
 	$arIns = array(
 	  'ID_Proj'	=> $idProj,
 	  'InvcSeq'	=> $nSeq,
-	  'InvcNum'	=> SQLValue($strInvcNum),
+	  'InvcNum'	=> $db->SanitizeAndQuote($strInvcNum),
 	  'WhenCreated'	=> 'NOW()',
-	  'Notes'	=> SQLValue($sNotes)
+	  'Notes'	=> $db->SanitizeAndQuote($sNotes)
 	  );
 	$this->Insert($arIns);
-	$id = $this->Engine()->NewID();
+	$id = $db->NewID();
 	return $id;
     }
 
@@ -127,8 +142,8 @@ class clsWFInvoice extends cDataRecord_MW {
     public function CreateEvent(array $arArgs) {
 	return NULL;
     }
-    public function AdminLink_name() {
-	return $this->AdminLink($this->InvoiceNumber());
+    public function SelfLink_name() {
+	return $this->SelfLink($this->InvoiceNumber());
     }
 
     // -- BOILERPLATE AUXILIARY -- //
@@ -172,10 +187,10 @@ class clsWFInvoice extends cDataRecord_MW {
     // ++ DATA TABLES ACCESS ++ //
 
     protected function ProjectTable($id=NULL) {
-	return $this->Engine()->Make('clsWFProjects');
+	return $this->Engine()->Make(KS_CLASS_PROJECTS);
     }
     protected function SessionTable($id=NULL) {
-	return $this->Engine()->Make('clsWFSessions');
+	return $this->Engine()->Make('wfcSessions');
     }
     protected function InvoiceLineTable() {
 	return $this->Engine()->Make('clsWFInvcLines');
@@ -238,57 +253,43 @@ class clsWFInvoice extends cDataRecord_MW {
     */
     private $frmPage;
     private function PageForm() {
-	if (empty($this->frmEdit)) {
+	if (empty($this->frmPage)) {
 
-	    $oForm = new fcForm_DB($this->Table()->ActionKey(),$this);
+	    $oForm = new fcForm_DB($this);
 	      $oField = new fcFormField_Num($oForm,'ID_Proj');
-		$oCtrl = new fcFormControl_HTML_DropDown($oForm,$oField,array());
+		$oCtrl = new fcFormControl_HTML_DropDown($oField,array());
                 $oCtrl->Records($this->ProjectRecords());
 
 	      $oField = new fcFormField_Text($oForm,'InvcSeq');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>3));
+		$oCtrl = new fcFormControl_HTML($oField,array('size'=>3));
 
 	      $oField = new fcFormField_Text($oForm,'InvcNum');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>20));
+		$oCtrl = new fcFormControl_HTML($oField,array('size'=>20));
 
 	      $oField = new fcFormField_Num($oForm,'TotalAmt');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>5));
+		$oCtrl = new fcFormControl_HTML($oField,array('size'=>5));
 
 	      $oField = new fcFormField_Time($oForm,'WhenCreated');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>10));
+		$oCtrl = new fcFormControl_HTML_Timestamp($oField,array('size'=>10));
 		  $oCtrl->Editable(FALSE);	// make control read-only
 
 	      $oField = new fcFormField_Time($oForm,'WhenEdited');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>10));
+		$oCtrl = new fcFormControl_HTML_Timestamp($oField,array('size'=>10));
 		  $oCtrl->Editable(FALSE);	// make control read-only
 
 	      $oField = new fcFormField_Time($oForm,'WhenSent');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>10));
+		$oCtrl = new fcFormControl_HTML_Timestamp($oField,array('size'=>10));
 		//$oField->Format('n/j G:i');
 
 	      $oField = new fcFormField_Time($oForm,'WhenPaid');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>10));
+		$oCtrl = new fcFormControl_HTML_Timestamp($oField,array('size'=>10));
 
 	      $oField = new fcFormField_Time($oForm,'WhenVoid');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>15));
+		$oCtrl = new fcFormControl_HTML_Timestamp($oField,array('size'=>15));
 
 	      $oField = new fcFormField_Text($oForm,'Notes');
-		$oCtrl = new fcFormControl_HTML_TextArea($oForm,$oField,array('rows'=>3,'cols'=>50));
+		$oCtrl = new fcFormControl_HTML_TextArea($oField,array('rows'=>3,'cols'=>50));
 
-	    /* 2015-05-06 forms v1
-
-	    // create fields & controls
-	    $oForm = new fcForm_DB($this->Table()->ActionKey(),$this);
-
-	    $oForm->AddField(new clsFieldNum	('ID_Proj'),	new clsCtrlHTML());
-	    $oForm->AddField(new clsField	('InvcSeq'),	new clsCtrlHTML(array('size'=>3)));
-	    $oForm->AddField(new clsField	('InvcNum'),	new clsCtrlHTML(array('size'=>20)));
-	    $oForm->AddField(new clsFieldNum	('TotalAmt'),	new clsCtrlHTML(array('size'=>5)));
-	    $oForm->AddField(new clsFieldTime	('WhenSent'),	new clsCtrlHTML(array('size'=>10)));
-	    $oForm->AddField(new clsFieldTime	('WhenPaid'),	new clsCtrlHTML(array('size'=>10)));
-	    $oForm->AddField(new clsFieldTime	('WhenVoid'),	new clsCtrlHTML(array('size'=>15)));
-	    $oForm->AddField(new clsField	('Notes'),	new clsCtrlHTML_TextArea(array('height'=>3,'width'=>50)));
-	    */
 	    $this->frmPage = $oForm;
 	}
 	return $this->frmPage;
@@ -341,7 +342,7 @@ __END__;
 	      'WhenVoid'	=> 'NOW()',
 	      );
 	    $this->Update($arUpd);
-	    $this->AdminRedirect();
+	    $this->SelfRedirect();
 	}
 
 	if ($doSave) {
@@ -371,11 +372,7 @@ If we ever want to have more "do" options, then use this code instead:
 	if (!$this->IsVoid() && !$doEdit) {
 	    $sPopup = 'immediately VOID this invoice';
 	    $arLink['do'] = 'void';
-	    $htVoidNow = ' ['.$this->AdminLink('void now',$sPopup,$arLink).']';
-	    /* 2015-05-06 old
-	    $arLink['do'] = 'void';
-	    $htVoidNow = ' ['.$vgOut->SelfLink($arLink,'void now', 'VOID the invoice (without saving edits)').']';
-	    */
+	    $htVoidNow = ' ['.$this->SelfLink('void now',$sPopup,$arLink).']';
 	} else {
 	    $htVoidNow = NULL;
 	}
@@ -392,76 +389,19 @@ If we ever want to have more "do" options, then use this code instead:
 	} else {
 	    $frmEdit->LoadRecord();
 	}
+
+	// -- RENDER THE FORM
+
 	$oTplt = $this->PageTemplate();
 	$arCtrls = $frmEdit->RenderControls($doEdit);
 	  // custom vars
-	  $arCtrls['ID'] = $this->AdminLink();
+	  $arCtrls['ID'] = $this->SelfLink();
 	  $arCtrls['!DoVoid'] = $htVoidNow;
 
 	$oTplt->VariableValues($arCtrls);
 	$out .= $oTplt->Render();
 
-	// -- RENDER THE FORM
-
-	/* 2015-05-06 OLD
-	$ar = $this->Values();
-
-	$arLink = $vgPage->Args(array('page','id'));
-
-	if ($doEdit) {
-	    $objForm = $this->PageForm();
-
-	    $arArgs = array(
-	      'default'	=> $ar['ID_Proj'],
-	      'name'	=> 'ID_Proj',
-	      );
-	    $htProj = $this->objDB->Projects()->DropDown($arArgs);
-	    $htSeq	= $objForm->RenderControl('InvcSeq');
-	    $htNum	= $objForm->RenderControl('InvcNum');
-	    $htTot	= $objForm->RenderControl('TotalAmt');
-	    $htWhenSent	= $objForm->RenderControl('WhenSent');
-	    $htWhenPaid	= $objForm->RenderControl('WhenPaid');
-	    $htWhenVoid	= $objForm->RenderControl('WhenVoid');
-	    $htNotes	= $objForm->RenderControl('Notes');
-	} else {
-	    $objProj = $this->ProjectRecord();
-
-	    $htProj = $objProj->AdminLink($objProj->Value('Name'));
-	    $htSeq = $ar['InvcSeq'];
-	    $htNum = $ar['InvcNum'];
-	    $htTot = '$'.$ar['TotalAmt'];
-	    $htWhenSent = $ar['WhenSent'];
-	    $htWhenPaid = $ar['WhenPaid'];
-	    $htWhenVoid = $ar['WhenVoid'].$htVoidNow;
-	    $htNotes = $ar['Notes'];
-	}
-	$htWhenCrea = $ar['WhenCreated'];
-	$htWhenEdit = $ar['WhenEdited'];
-
-	$htID = $this->KeyValue();
-	$htWhenCreated = $ar['WhenCreated'];
-	if (is_null($ar['ID_Debit'])) {
-	    $htDebit = 'N/A';
-	} else {
-	    $objSessDebit = $this->objDB->Sessions()->GetItem($ar['ID_Debit']);
-	    $htDebit = $objSessDebit->AdminLink();
-	}
-
-	$out .= '<table>';
-	$out .= "\n<tr><td align=right><b>ID</b>:</td><td>$htID</td></tr>";
-	$out .= "\n<tr><td align=right><b>Project</b>:</td><td>$htProj</td></tr>";
-	$out .= "\n<tr><td align=right><b>Sequence</b>:</td><td>$htSeq</td></tr>";
-	$out .= "\n<tr><td align=right><b>Number</b>:</td><td>$htNum</td></tr>";
-	$out .= "\n<tr><td align=right><b>Total</b>:</td><td>$htTot</td></tr>";
-	$out .= "\n<tr><td align=right><b>Created</b>:</td><td>$htWhenCrea</td></tr>";
-	$out .= "\n<tr><td align=right><b>Edited</b>:</td><td>$htWhenEdit</td></tr>";
-	$out .= "\n<tr><td align=right><b>Sent</b>:</td><td>$htWhenSent</td></tr>";
-	$out .= "\n<tr><td align=right><b>Paid</b>:</td><td>$htWhenPaid</td></tr>";
-	$out .= "\n<tr><td align=right><b>Voided</b>:</td><td>$htWhenVoid</td></tr>";
-	$out .= "\n<tr><td align=right><b>Debit Session</b>:</td><td>$htDebit</td></tr>";
-	$out .= "\n<tr><td align=right><b>Notes</b>:</td><td>$htNotes</td></tr>";
-	$out .= '</table>';
-	*/
+	// FORM FOOTER
 
 	if ($doForm) {
 	    $out .= '<input type=submit name=btnSave value="Save">';
@@ -533,9 +473,9 @@ __END__;
 
 		    $wtStyle .= ($isVoid?' text-decoration:line-through;':'');
 
-		    $ftID = $this->AdminLink();
+		    $ftID = $this->SelfLink();
 		    $objProj = $this->ProjectRecord();
-		    $ftProj = $objProj->AdminLink($objProj->Value('InvcPfx'),$objProj->Value('Name'));
+		    $ftProj = $objProj->SelfLink($objProj->Value('InvcPfx'),$objProj->Value('Name'));
 		    $ftNum = $this->Value('InvcNum');
 		    $ftTot = $this->Value('TotalAmt');
 		    $ftWhenCrea = $this->Value('WhenCreated');
@@ -569,13 +509,13 @@ __END__;
     }
     /*-----
       RETURNS: HTML for drop-down list of invoices in current data set
-	Includes "NONE" as a choice. (should this be an option in $iArArgs?)
+	Includes "NONE" as a choice. (should this be an option in $arArgs?)
     */
-    public function DropDown(array $iArArgs=NULL) {
-	$strName = nzArray($iArArgs,'ctrl.name',$this->Table()->Name());
-	$strNone = nz($iArArgs['none'],'none found');
-	$sqlNone = nz($iarArgs['none.sql'],'NULL');	// SQL to use for 'none'
-	$intDeflt = nz($iArArgs['default'],0);
+    public function DropDown(array $arArgs=NULL) {
+	$strName = fcArray::Nz($arArgs,'ctrl.name',$this->Table()->Name());
+	$strNone = fcArray::Nz($arArgs,'none','none found');
+	$sqlNone = fcArray::Nz($arArgs,'none.sql','NULL');	// SQL to use for 'none'
+	$intDeflt = fcArray::Nz($arArgs,'default',0);
 	if ($this->hasRows()) {
 	    $out = "\n".'<select name="'.$strName.'">';
 	    // "NONE"
@@ -697,7 +637,6 @@ __END__;
 	$rcILine = $this->InvoiceLineTable()->SpawnItem();
 	foreach ($arSessRecs as $sSort => $arSess) {
 	    $rcSess->Values($arSess);
-
 	    $dlrLine = $rcSess->Cost_calc();
 	    $dlrBal += $dlrLine;
 	    $arSess['CostLine'] = $dlrLine;
@@ -718,9 +657,8 @@ __END__;
 	  'TotalAmt'	=> $dlrBal,
 	  'ID_Debit'	=> 'NULL'       // not using this anymore
 	  );
-	$this->Update($arUpd);
 
-
+	  $this->Update($arUpd);
     }
     /*-----
       INPUT:
@@ -775,5 +713,5 @@ __END__;
         }
     }
 
-    // ++ ACTIONS ++ //
+    // -- ACTIONS -- //
 }

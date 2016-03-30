@@ -4,7 +4,7 @@
   HISTORY:
     2013-11-08 split off from WorkFerret.main
 */
-class clsWFSessions extends clsDataTable_Menu {
+class wfcSessions extends clsDataTable_Menu {
     private $ctsBalCalc;
     private $arSave;	// fields to set on insert/update
 
@@ -14,39 +14,60 @@ class clsWFSessions extends clsDataTable_Menu {
 	parent::__construct($iDB);
 	  $this->Name('session');
 	  $this->KeyName('ID');
-	  $this->ClassSng('clsWFSession');
+	  $this->ClassSng('wfcSession');
 	  $this->ActionKey('sess');
 	$this->arSave = NULL;
     }
 
     // -- SETUP -- //
-    // ++ CALLBACKS? ++ //
+    // ++ RECORDSET ACCESS ++ //
+
+    /*----
+      INPUT:
+	$idProj = ID of Project whose Sessions we want
+	$doUseInvcd = if TRUE, include Sessions that have already been invoiced
+    */
+    public function Records_forProject($idProj,$doUseInvcd) {
+	$qof = new fcSQLt_Filt('AND');
+	$qof->AddCond('ID_Proj='.$idProj);
+
+	// TODO: prevent ID_InvcLine from being saved as "0" when "NONE" is selected
+	if ($doUseInvcd) {
+	    $qof->AddCond('(ID_InvcLine IS NOT NULL) AND (ID_InvcLine != 0)');
+	} else {
+	    $qof->AddCond('(ID_InvcLine IS NULL) OR (ID_InvcLine=0)');
+	}
+	$sqlFilt = $qof->RenderValue();
+
+	return $this->GetData($sqlFilt,NULL,'WhenStart,IFNULL(Sort,1000),WhenFinish,Seq');
+    }
+
+
+    // -- RECORDSET ACCESS -- //
+    // ++ BUTTON PUSHES ++ //
 
     /*----
       HISTORY:
 	2013-10-23 removed array from parameter list because nothing can use it
+	2015-06-18 had to put it back in for AdminFinish, but now taking it back out again
     */
-    public function AdminSave($idProj) {
+/*    public function EditSave_line() {
 	$rcSess = $this->SpawnItem();
-	$rcSess->ProjectID($idProj);
-	$rcSess->AdminCreate();
-    }
+	$rcSess->EditSave_line();
+    }*/
     /*----
       PURPOSE: Specialized AdminSave() that records the current time as the end of the session
       HISTORY:
 	2013-10-24 created
     */
-    public function AdminFinish($idProj) {
-	$this->arSave = array('WhenFinish'=>'NOW()');
-	$this->AdminSave($idProj);
-    }
-    public function Fields_forSave() {
-	return $this->arSave;
-    }
+/*    public function EditFinish_line() {
+	$rcSess = $this->SpawnItem();
+	$rcSess->EditFinish_line();
+    }*/
 
-    // -- CALLBACKS? -- //
+    // -- BUTTON PUSHES -- //
 }
-class clsWFSession extends cDataRecord_MW {
+class wfcSession extends cDataRecord_MW {
 
     // ++ STATIC ++ //
 
@@ -143,7 +164,7 @@ class clsWFSession extends cDataRecord_MW {
 	return !is_null($this->InvoiceID());
     }
     protected function HasRate() {
-        return $this->HasValue('ID_Rate');
+        return ($this->HasValue('ID_Rate') && !is_null($this->RateID()));
     }
     // PUBLIC for ILine to copy from
     public function CostLine_stored() {
@@ -281,9 +302,26 @@ class clsWFSession extends cDataRecord_MW {
 	$fltHours = $this->TimeFinal_minutes() / 60;
 	return ((int)($fltHours / $nRound)) * $nRound;
     }
+    /*----
+      RETURNS: TRUE iff the final total is based only on hours worked
+    */
+    public function IsTimeBased() {
+	return !$this->CostPlus_isSet();
+    }
+    /*----
+      RETURNS: TRUE if the Rate is based on quantity (typically hours)
+      PUBLIC so that Form object can call it at save time
+    */
+    public function HasQtyRate() {
+	if ($this->HasRate()) {
+	    $rcRate = $this->RateRecord();
+	    return $rcRate->IsQtyBased();
+	}
+	return FALSE;
+    }
     public function RateUsed() {
 	if ($this->IsNew() || is_null($this->Value('BillRate'))) {
-	    $rcRate = $this->RateObj();
+	    $rcRate = $this->RateRecord();
 	    if (is_object($rcRate)) {
 		$dlrRate = $rcRate->Value('PerHour');
 	    } else {
@@ -293,12 +331,6 @@ class clsWFSession extends cDataRecord_MW {
 	    $dlrRate = $this->Value('BillRate');
 	}
 	return $dlrRate;
-    }
-    /*----
-      RETURNS: TRUE iff the final total is based only on hours worked
-    */
-    public function IsTimeBased() {
-	return !$this->CostPlus_isSet();
     }
 
     // -- FIELD CALCULATIONS -- //
@@ -342,7 +374,7 @@ class clsWFSession extends cDataRecord_MW {
 	    return $this->rcProj;
 	}
     }
-    public function RateObj() {
+    public function RateRecord() {
 	if ($this->HasRate()) {
 	    $idRate = $this->RateID();
 	    if (!is_null($idRate)) {
@@ -398,14 +430,16 @@ class clsWFSession extends cDataRecord_MW {
     // -- FOREIGN RECORD CACHE -- //
     // ++ FOREIGN RECORDSET ACCESS ++ //
 
-    protected function ProjectRecords_forChoice() {
+    // PUBLIC so Form object can call it
+    public function ProjectRecords_forChoice() {
 	$arArgs = array(
 	  'inact'	=> !$this->ProjectRecord()->IsActive(),
 	  'always'	=> $this->ProjectID(),				// always show $idProj even if inactive
 	);
 	return $this->ProjectTable()->Records_forDropDown($arArgs);
     }
-    protected function InvoiceLineRecords_forChoice() {
+    // PUBLIC so Form object can call it
+    public function InvoiceLineRecords_forChoice() {
 	$tILines = $this->InvoiceLineTable();
 	if ($this->HasInvoice()) {
 	    $rs = $tILines->GetData('ID_Invc='.$this->InvoiceID());
@@ -428,10 +462,10 @@ class clsWFSession extends cDataRecord_MW {
 	  'ID_Invc'	=> $idInvc,
 	  'ID_InvcLine'	=> $rcLine->KeyValue(),
 	  );
-	  echo 'SESS UPDATE:'.clsArray::Render($arUpd);
 	$this->Update($arUpd);
     }
 
+    // -- ACTIONS -- //
     // ++ WEB INTERFACE: CONTROLS ++ //
 
     // 2015-05-03 these may be obsolete shortly...
@@ -554,42 +588,7 @@ __END__;
     private $frmLine;
     protected function LineForm() {
 	if (is_null($this->frmLine)) {
-	    $oForm = new fcForm_DB($this->Table()->ActionKey(),$this);
-	      $oField = new fcFormField_Num($oForm,'ID_Proj');
-		$oCtrl = new fcFormControl_HTML_Hidden($oForm,$oField,array());
-
-	      $oField = new fcFormField_Time($oForm,'WhenStart');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>10));
-                $oField->Format('n/j G:i');
-
-	      $oField = new fcFormField_Time($oForm,'WhenFinish');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>10));
-                $oField->Format('n/j G:i');
-
-	      $oField = new fcFormField_Num($oForm,'Sort');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>1));
-
-	      $oField = new fcFormField_Num($oForm,'TimeAdd');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>2));
-
-	      $oField = new fcFormField_Num($oForm,'TimeSub');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>2));
-
-              $oField = new fcFormField_Num($oForm,'ID_Rate');
-		$oCtrl = new fcFormControl_HTML_DropDown($oForm,$oField,array());
-                $oCtrl->Records($this->ProjectRecord()->RateRecords());
-                $oCtrl->NoDataString('none available');
-
-	      $oField = new fcFormField_Num($oForm,'CostAdd');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>4));
-
-	      $oField = new fcFormField_Text($oForm,'Descr');
-		$oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>40));
-
-            $oForm->NewValue('WhenStart',time());
-            //$oForm->NewValue('ID_Rate',clsArray::Nz($arArgs,'rate'));
-            $oForm->NewValue('ID_Proj',$this->ProjectID());
-
+	    $oForm = new wfcForm_Session_line($this);
 	    $this->frmLine = $oForm;
 	}
 	return $this->frmLine;
@@ -603,78 +602,7 @@ __END__;
     private $frmPage;
     public function PageForm() {
 	if (empty($this->frmPage)) {
-	    $oForm = new fcForm_DB($this->Table()->ActionKey(),$this);
-
-	    $oField = new fcFormField_Num($oForm,'ID_Proj');
-              $oCtrl = new fcFormControl_HTML_DropDown($oForm,$oField,array());
-                $oCtrl->Records($this->ProjectRecords_forChoice());
-                $oCtrl->NoDataString('none available');
-
-            $oField = new fcFormField_Time($oForm,'WhenStart');
-              $oCtrl = new fcFormControl_HTML($oForm,$oField,array());
-
-            $oField = new fcFormField_Time($oForm,'WhenFinish');
-              $oCtrl = new fcFormControl_HTML($oForm,$oField,array());
-
-            $oField = new fcFormField_Num($oForm,'Sort');
-              $oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>2));
-
-            $oField = new fcFormField_Num($oForm,'TimeAdd');
-              $oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>2));
-
-            $oField = new fcFormField_Num($oForm,'TimeSub');
-              $oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>2));
-
-            $oField = new fcFormField_Num($oForm,'BillRate');
-              $oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>5));
-
-            $oField = new fcFormField_Num($oForm,'TimeTotal');
-              $oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>2));
-
-	    $oField = new fcFormField_Num($oForm,'ID_Rate');
-	      $oCtrl = new fcFormControl_HTML_DropDown($oForm,$oField,array());
-		$oCtrl->Records($this->ProjectRecord()->RateRecords());
-		$oCtrl->NoDataString('no rates set');
-		$oCtrl->NoObjectString('no project set');
-		$oCtrl->AddChoice('','(none)');
-
-            $oField = new fcFormField_Num($oForm,'CostAdd');
-              $oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>5));
-
-	    $oField = new fcFormField_Num($oForm,'ID_Invc');
-              $oCtrl = new fcFormControl_HTML($oForm,$oField,array());
-
-	    $oField = new fcFormField_Num($oForm,'ID_InvcLine');
-              $oCtrl = new fcFormControl_HTML_DropDown($oForm,$oField,array());
-		if (!$this->IsNew()) {
-		    $oCtrl->Records($this->InvoiceLineRecords_forChoice());
-		}
-		$oCtrl->NoObjectString('no invoice assigned');
-		$oCtrl->AddChoice('','(unassign)');
-
-            $oField = new fcFormField_Text($oForm,'Descr');
-              $oCtrl = new fcFormControl_HTML($oForm,$oField,array('size'=>40));
-
-            $oField = new fcFormField_Text($oForm,'Notes');
-              $oCtrl = new fcFormControl_HTML_TextArea($oForm,$oField,array('rows'=>3,'cols'=>50));
-
-	    /* ferreteria forms v1
-	    $oForm->AddField(new clsFieldNum	('ID_Proj'),	new clsCtrlHTML());	// control will be inserted elsewhere
-	    $oForm->AddField(new clsFieldTime('WhenStart'),	new clsCtrlHTML(array('size'=>20)));
-	    $oForm->AddField(new clsFieldTime('WhenFinish'),	new clsCtrlHTML(array('size'=>20)));
-	    $oForm->AddField(new clsField	('Sort'),	new clsCtrlHTML(array('size'=>2)));
-	    $oForm->AddField(new clsField	('TimeAdd'),	new clsCtrlHTML(array('size'=>2)));
-	    $oForm->AddField(new clsField	('TimeSub'),	new clsCtrlHTML(array('size'=>2)));
-	    //$objForm->AddField(new clsField	('TimeTotal'),	new clsCtrlHTML(array('size'=>3)));	// calculated field -- don't edit
-	    $oForm->AddField(new clsFieldNum	('ID_Rate'),	new clsCtrlHTML());	// control will be inserted elsewhere
-	    $oForm->AddField(new clsFieldNum	('BillRate'),	new clsCtrlHTML(array('size'=>5)));
-	    $oForm->AddField(new clsFieldNum	('CostAdd'),	new clsCtrlHTML(array('size'=>5)));
-	    //$objForm->AddField(new clsFieldNum	('CostLine'),	new clsCtrlHTML(array('size'=>5)));	// calculated field - don't edit
-	    $oForm->AddField(new clsFieldNum	('ID_Invc'),	new clsCtrlHTML());	// control will be inserted elsewhere
-	    $oForm->AddField(new clsFieldNum	('ID_InvcLine'),	new clsCtrlHTML());	// control will be inserted elsewhere
-	    $oForm->AddField(new clsField	('Descr'),	new clsCtrlHTML(array('size'=>40)));
-	    $oForm->AddField(new clsField	('Notes'),	new clsCtrlHTML_TextArea(array('height'=>3,'width'=>50)));
-*/
+	    $oForm = new wfcForm_Session_page($this);
 	    $this->frmPage = $oForm;
 	}
 	return $this->frmPage;
@@ -692,45 +620,14 @@ __END__;
     	$this->ProjectID($idProj);
 
 	$frmEdit = $this->LineForm();
-	//$frmEdit->NewValue('WhenStart',date('n/j G:i'));
         $frmEdit->ClearValues();  // for now, this is only used to add new rows
 	$arCtrls = $frmEdit->RenderControls(TRUE); // always edit
 	$oTplt = $this->LineTemplate();
-
-        // customize the controls
-        //$arCtrls['ID_Rate'] = $this->Rates_DropDown();
 
   	// render the template
 	$oTplt->VariableValues($arCtrls);
 	$out = $oTplt->Render();
 
-        /* 2015-05-02 rewriting for forms v2
-	$idProj = $iArArgs['proj'];
-	if (array_key_exists('rate',$iArArgs)) {
-	    $this->Row['ID_Rate'] = $iArArgs['rate'];
-	}
-	$this->Row['ID_Proj'] = $idProj;
-	$out = "\n<tr>"
-	  .'<input type=hidden name="sess[context]" value="session">'
-	  .'<input type=hidden name="sess[ID_Proj]" value="'.$idProj.'">'
-	  .'<td colspan=2>new</td>'
-	  .'<td colspan=2></td>'
-	  .'<td><input name="sess[WhenStart]" size=10 value="'.date('n/j G:i').'"></td>'
-	  .'<td><input name="sess[WhenFinish]" size=10 ></td>'
-	  .'<td><input name="sess[Sort]" size=1></td>'
-	  .'<td><input name="sess[TimeAdd]" size=2></td>'
-	  .'<td><input name="sess[TimeSub]" size=2></td>'
-	  .'<td align=center>-</td>'
-	  .'<td>'.$this->Rates_DropDown().'</td>'	// edit row to override preset rates
-	  .'<td align=center>-</td>'
-	  .'<td><input name="sess[CostAdd]" size=4></td>'
-	  .'</tr><tr>'
-	  .'<td colspan=12>Description: <input name="sess[Descr]" size=40>'
-	    .'<input type=submit name=btnSaveSess value="Save">'
-	    .'<input type=submit name=btnFinishSess value="Finish">'
-	  .'</td>'
-	  .'</tr>';
-	  */
 	return $out;
     }
     /*-----
@@ -738,15 +635,14 @@ __END__;
       TODO: convert this to use Ferreteria Forms
     */
     public function AdminList(array $iArArgs) {
-	$doNew = NzArray($iArArgs,'doNew');
+	$doNew = fcArray::Nz($iArArgs,'doNew');
 
 	if ($this->hasRows() || $doNew) {
-	    $doInvc = NzArray($iArArgs,'doInvc');
-	    //$doForm = $iArArgs['doForm'];
-	    $doBal = NzArray($iArArgs,'doBal');
+	    $doInvc = fcArray::Nz($iArArgs,'doInvc');
+	    $doBal = fcArray::Nz($iArArgs,'doBal');
 	    $doEdit = $doNew;	// we might eventually edit existing lines, but for now...
 
-	    $objInvcLines = $this->Engine()->InvcLines();
+	    //$objInvcLines = $this->Engine()->InvcLines();
 
 	    $out = "\n<table>".self::TableHdr($doEdit);
 
@@ -786,16 +682,20 @@ __END__;
 		}
 
 		$ftDate = date('m/d',$dtStart);
-		$ftStart = Time_DefaultDate($strWhenStart,$strWhenStart);
+		$ftStart = fcTime::DefaultDate($strWhenStart,$strWhenStart);
 
 		$ftTimeAdd = $this->Value('TimeAdd');
 		$ftTimeSub = $this->Value('TimeSub');
 		$ftTimeTot = $this->Value('TimeTotal');
+		$sRate = $this->Value('BillRate');
 		if (is_null($this->Value('ID_Rate'))) {
-		    $ftRate = $this->Value('BillRate');
+		    $ftRate = $sRate;
 		} else {
-		    $objRate = $this->RateObj();
-		    $ftRate = $objRate->AdminLink($this->Value('BillRate'));
+		    $rcRate = $this->RateRecord();
+		    if (is_null($sRate)) {
+			$sRate = '('.$rcRate->PerUnit().')';
+		    }
+		    $ftRate = $rcRate->SelfLink($sRate);
 		}
 		$ftCostAdd = $this->Value('CostAdd');
 		$ftCostTot = $this->Value('CostLine');
@@ -803,7 +703,7 @@ __END__;
 		$vSort = $this->Value('Sort');
 		$ftSort = empty($vSort)?'-':sprintf('%0.1f',$vSort);
 
-		$ftID_link = $this->AdminLink();
+		$ftID_link = $this->SelfLink();
 		if ($needCalc) {
 		    $ftDelta = '<span style="color: red;">&Delta;</span>';
 		} else {
@@ -832,7 +732,7 @@ __END__;
 		    if (is_null($objInvc)) {
 			$ftInvc .= '<b>unknown invc ID='.$idInvc.'</b>';
 		    } else {
-			$ftInvc .= '<b>invc</b> '.$objInvc->AdminLink($objInvc->Value('InvcNum'));
+			$ftInvc .= '<b>invc</b> '.$objInvc->SelfLink($objInvc->Value('InvcNum'));
 		    }
 		}
 
@@ -846,7 +746,7 @@ __END__;
 		    if (is_null($objILine)) {
 			$ftInvc .= '<b>unknown line ID='.$idILine.'</b>';
 		    } else {
-			$ftInvc .= '<b>line</b> '.$objILine->AdminLink($objILine->ShortDesc());
+			$ftInvc .= '<b>line</b> '.$objILine->SelfLink($objILine->ShortDesc());
 		    }
 		}
 		$htTR = "\n<tr style=\"$wtStyle\">";
@@ -895,8 +795,8 @@ __END__;
 	$vgPage->UseHTML();
 
 	if ($doSave) {
-	    $this->AdminSave();
-	    $this->AdminRedirect();	// clear the form data out of the page reload
+	    $this->EditSave_page();
+	    $this->SelfRedirect();	// clear the form data out of the page reload
 	}
 
 	if ($doCalc) {
@@ -935,6 +835,7 @@ __END__;
 	$isNew = $this->IsNew();
 	$frmEdit = $this->PageForm();
 	if ($isNew) {
+	echo __FILE__.' line '.__LINE__.'<br>';
 	    $frmEdit->ClearValues();
 	} else {
 	    $frmEdit->LoadRecord();
@@ -942,7 +843,7 @@ __END__;
 	$oTplt = $this->PageTemplate();
 	$arCtrls = $frmEdit->RenderControls($doEdit);
 	  // custom vars
-	  $arCtrls['ID'] = $this->AdminLink();
+	  $arCtrls['ID'] = $this->SelfLink();
 	  $arCtrls['WhenEntered'] = $this->WhenEntered_text();
 	  $arCtrls['WhenEdited'] = $this->WhenEdited_text();
 	  $arCtrls['WhenFigured'] = $this->WhenFigured_text();
@@ -1011,187 +912,6 @@ __END__;
 	    $out .= $oTplt->Render();
 	}
 
-	/* 2015-05-03 forms v1
-	$idProj = $this->Value('ID_Proj');
-	$idInvc = $this->Value('ID_Invc');
-
-	if ($doForm) {
-	    $needCalc = FALSE;	// data is changing anyway
-	    //$out .= $objSection->FormOpen();
-	    $out .= "\n<form method=post>";
-	    $objForm = $this->PageForm();
-
-	    $rcProj = $this->ProjectRecord();
-	    $htProj = $this->ProjectTable()->DropDown(array(
-	      'name'	=> 'ID_Proj',	// control's name
-	      // show inactive projects if currently assigned to an inactive project:
-	      'inact'	=> !$rcProj->IsActive(),
-	      'always'	=> $idProj,	// always show $idProj even if inactive
-	      'default'	=> $idProj,	// default value is $idProj
-	      ));
-	    $htStart = $objForm->RenderControl('WhenStart');
-	    $htFinish = $objForm->RenderControl('WhenFinish');
-	    $htSort = $objForm->RenderControl('Sort');
-	    // time
-	    $htTimeAdd = $objForm->RenderControl('TimeAdd');
-	    $htTimeSub = $objForm->RenderControl('TimeSub');
-	    $htTimeTot = '';
-	    $htTimeTotRow = '';
-	    // rate ($/time)
-	    $htRateType = $this->Rates_DropDown();
-	    $htRateUsed = $objForm->RenderControl('BillRate');
-	    // cost
-	    $htCostAdd = $objForm->RenderControl('CostAdd');
-	    $htCostTotRow = '';
-
-	    $objIRows = $objInvcs->GetData('ID_Proj='.$idProj);
-
-	    $arOpt = array(
-	      'ctrl.name'	=> 'ID_Invc',
-	      'default'		=> $idInvc
-	      );
-	    $htInvc = $objIRows->DropDown($arOpt);
-	    $doILineChooser = !is_null($this->Value('ID_Invc'));
-
-	    $htDescr = '<input type=text name="Descr" size=40 value="'.htmlspecialchars($this->Value('Descr')).'">';
-	    $htNotes = '<textarea name="Notes" rows=3 cols=40>'.htmlspecialchars($this->Value('Notes')).'</textarea>';
-	} else {
-	    $objCalc = new SessionObjCalc($this);
-	      $objCalc->CalcRow();
-	      $intTimeTotCalc	= $objCalc->intTimeTot;
-	      $dlrCalcCost	= $objCalc->dlrCostTot;
-	      $needCalc		= $objCalc->needCalc;
-
-	    $objProj = $this->Engine()->Projects()->GetItem($idProj);
-	    $htProj = $objProj->AdminLink($objProj->Value('Name'));
-
-	    $htStart = $this->Value('WhenStart');
-	    $htFinish = $this->Value('WhenFinish');
-	    $htSort = $this->Value('Sort');
-	    // money
-	    $mnyBillRate = $this->Value('BillRate');
-	    $mnyCostAdd = $this->Value('CostAdd');
-	    $mnyCostLine = $this->Value('CostLine');
-	    $htRateUsed = is_null($mnyBillRate)?'-':('$'.$mnyBillRate);
-	    $htCostAdd = is_null($mnyCostAdd)?'-':('$'.$mnyCostAdd);
-	    $htCostTot = is_null($mnyCostLine)?'-':('$'.$mnyCostLine);
-	    // time
-	    $intTimeAdd = $this->Value('TimeAdd');
-	    $intTimeSub = $this->Value('TimeSub');
-	    $intTimeTot = $this->Value('TimeTotal');
-	    $htTimeAdd = is_null($intTimeAdd)?'-':$intTimeAdd.' minute'.Pluralize($intTimeAdd);
-	    $htTimeSub = is_null($intTimeSub)?'-':$intTimeSub.' minute'.Pluralize($intTimeSub);
-	    $htTimeTot = empty($intTimeTot)?'-':$intTimeTot.' minute'.Pluralize($intTimeTot);
-
-	    // -- CHECK CALCULATED FIELDS
-
-	    // time
-	    if ($intTimeTot==$intTimeTotCalc) {
-		// calculated time matches recorded time
-		$htTimeTotCalc = '&radic;';
-	    } else {
-		// recorded time needs recalculating
-		$htTimeTotCalc = '&rarr; '.$intTimeTotCalc.' minute'.Pluralize($intTimeTotCalc);
-		$needCalc = TRUE;
-	    }
-	    $htTimeTotRow = "\n<tr><td align=right><b>Total Time</b>:</td><td><i>$htTimeTot</i></td><td>$htTimeTotCalc</td></tr>";
-
-	    // cost
-	    if ($mnyCostLine == $dlrCalcCost) {
-		// calculated line cost total matches recorded line cost total
-		$htCostTotCalc = '&radic;';
-	    } else {
-		// recorded line cost total needs recalculating
-		$htCostTotCalc = '&rarr; '.$dlrCalcCost;
-		$needCalc = TRUE;
-	    }
-	    $htCostTotRow = "\n<tr><td align=right><b>Total Cost</b>:</td><td>$htCostTot</td><td>$htCostTotCalc</td></tr>";
-
-	    // rate ($/time)
-	    if (is_null($this->Value('ID_Rate'))) {
-		$htRateType = 'n/a';
-	    } else {
-		$objRate = $this->RateObj();
-		$htRateType = $objRate->AdminLink('$'.$objRate->Value('PerHour').' - '.$objRate->Value('Name'));
-	    }
-
-	    $idInvc = $this->Value('ID_Invc');
-	    if (empty($idInvc) || ($idInvc == -1)) {
-		$htInvc = 'NONE';
-	    } else {
-		$objInvc = $this->InvoiceRecord();
-		$htInvc = $objInvc->AdminLink($objInvc->Value('InvcNum'));
-	    }
-
-	    $doILineChooser = FALSE;
-
-	    $htDescr = $this->Value('Descr');
-	    $htNotes = $this->Value('Notes');
-	}
-	$idILine = $this->Value('ID_InvcLine');
-	if ($doILineChooser) {
-	    $objILRows = $objILines->GetData('ID_Invc='.$this->Value('ID_Invc'));
-	    $arOpt = array(
-	      'ctrl.name'	=> 'ID_InvcLine',
-	      'cur.id'		=> $idILine,
-	      'none.use'	=>TRUE
-	      );
-	    $htILine = $objILRows->DropDown($arOpt);
-	} else {
-	    if (empty($idILine) || ($idILine == -1)) {
-		$htILine = 'NONE';
-	    } else {
-		$objILine = $this->InvcLineObj();
-		if (is_null($objILine)) {
-		    $htILine = '?? ID='.$idILine;
-		} else {
-		    $htILine = $objILine->AdminLink($objILine->ShortDesc());	// $objILine->ShortDesc()
-		}
-	    }
-	}
-
-	if ($needCalc) {
-	    $objLink = $objSection->AddLink_local(new clsWikiSectionLink_option(array(),'recalc','do'));
-	    //$objSection->ActionAdd('recalc');
-	}
-	$outHdr = $objSection->Render();
-	$wgOut->AddHTML($outHdr);
-
-	$id = $this->KeyValue();
-	$htID = $this->AdminLink();
-
-	$htSeq = $intSeq;
-	$htWhenEnt = $this->Value('WhenEntered');
-	$htWhenEdt = $this->Value('WhenEdited');
-	$htWhenFig = $this->Value('WhenFigured');
-
-	$out .= '<table>';
-	$out .= "\n<tr><td align=right><b>ID</b>:</td><td>$htID</td></tr>";
-	$out .= "\n<tr><td align=right><b>Project</b>:</td><td>$htProj</td></tr>";
-	$out .= "\n<tr><td align=right><b>Started</b>:</td><td>$htStart</td></tr>";
-	$out .= "\n<tr><td align=right><b>Finished</b>:</td><td>$htFinish</td></tr>";
-	$out .= "\n<tr><td align=right><b>Sort</b>:</td><td>$htSort</td></tr>";
-	$out .= "\n<tr><td align=right><b>+Time</b>:</td><td>$htTimeAdd</td></tr>";
-	$out .= "\n<tr><td align=right><b>-Time</b>:</td><td>$htTimeSub</td></tr>";
-	$out .= $htTimeTotRow;
-	$out .= "\n<tr><td align=right><b>Rate Type</b>:</td><td>$htRateType</td></tr>";
-	$out .= "\n<tr><td align=right><b>Rate Used</b>:</td><td>$htRateUsed</td></tr>";
-	$out .= "\n<tr><td align=right><b>+Cost</b>:</td><td>$htCostAdd</td></tr>";
-	$out .= $htCostTotRow;
-	$out .= "\n<tr><td align=right><b>Invoice</b>:</td><td>$htInvc</td></tr>";
-	$out .= "\n<tr><td align=right><b>Invoice Line</b>:</td><td>$htILine</td></tr>";
-
-	$out .= "\n<tr><td align=right><b>Description</b>:</td><td>$htDescr</td></tr>";
-	$out .= "\n<tr><td align=right><b>Notes</b>:</td><td>$htNotes</td></tr>";
-	$out .= "\n<tr><td align=right><b>When Entered</b>:</td><td>$htWhenEnt</td></tr>";
-	$out .= "\n<tr><td align=right><b>When Edited</b>:</td><td>$htWhenEdt</td></tr>";
-	$out .= "\n<tr><td align=right><b>When Figured</b>:</td><td>$htWhenFig</td></tr>";
-	$out .= '</table>';
-	if ($doForm) {
-	    $out .= '<input type=submit name=btnSaveSess value="Save">';
-	    $out .= '</form>';
-	}
-*/
 	$wgOut->AddHTML($out); $out = '';
     }
     /*-----
@@ -1200,55 +920,36 @@ __END__;
 	2011-02-17 Retired old custom code; now using objForm helper object
 	2011-12-03 Adapted from VbzCart to WorkFerret.clsWFInvcLine.
 	2011-12-27 Copying from clsWFInvcLine to clsWFInvoice, replacing hand-built AdminSave().
-	2013-06-16 Copying from clsWFInvoice to clsWFSession, but commenting out for now
+	2013-06-16 Copying from clsWFInvoice to wfcSession, but commenting out for now
 		Retro note: presumably this refers to the old code. no longer needed.
 	2013-10-23 This is needed in order to, you know, save sessions. It also needs
 		to be public (but was private); fixed that.
+	2015-06-18 AdminSave() split into EditSave_page(), EditSave_line(), and EditFinish_line().
     */
-    public function AdminSave() {
+    public function EditSave_page() {
 	global $vgOut;
 
 	$oForm = $this->PageForm();
-	$oForm->ClearValues();
 	$out = $oForm->Save();
 	$vgOut->AddText($out);
     }
-    /*----
-      PURPOSE: Like AdminSave(), but for new records
-      HISTORY:
-	2013-10-23 created
-    */
-    public function AdminCreate() {
-//	global $wgRequest;
+    public function EditSave_line() {
+	global $vgOut;
 
-	/* 2015-05-04 commenting this out until I understand why/if it's actually needed
-	// fill in ID_Rate so it can be used by RateUsed()
-	$idRate = $wgRequest->GetIntOrNull('ID_Rate');
-	if (!is_null($idRate)) {
-	    $this->Value('ID_Rate',$idRate);
-	}*/
-	$this->AdminSave();
+	$oForm = $this->LineForm();
+	$out = $oForm->Save();
+	$vgOut->AddText($out);
+    }
+    public function EditFinish_line() {
+	global $vgOut;
+
+	$oForm = $this->LineForm();
+	$oForm->SetRecordValue('WhenFinish',time());		// for now, must be in NATIVE format
+	$out = $oForm->Save();
+	$vgOut->AddText($out);
     }
 
-    // ++ WEB INTERFACE: DISPLAY ++ //
-    // ++ CALLBACKS ++ //
-
-    /*----
-      USAGE: Called from objForm->Save()
-    */
-    public function Fields_forCreate() {
-	$ar = $this->Table->Fields_forSave();
-	$ar['WhenEntered'] = 'NOW()';
-	$ar['BillRate'] = SQLValue($this->RateUsed());		// might be null
-	return $ar;
-    }
-    public function Fields_forUpdate() {
-	$ar = $this->Table->Fields_forSave();
-	$ar['WhenEdited'] = 'NOW()';
-	return $ar;
-    }
-
-    // -- CALLBACKS -- //
+    // -- WEB INTERFACE: DISPLAY -- //
 }
 abstract class SessionCalc {
 // results - single-line
@@ -1288,14 +989,14 @@ abstract class SessionCalc {
 	$dlrBillRate = $this->Data('BillRate');
 	$dlrCostAdd =  $this->Data('CostAdd');
       // PART 1
-	clsModule::LoadFunc('Time_DefaultDate');
-	$ftStart = Time_DefaultDate($strWhenStart,$strWhenStart);
+	//clsModule::LoadFunc('Time_DefaultDate');
+	$ftStart = fcTime::DefaultDate($strWhenStart,$strWhenStart);
 	if (empty($strWhenFinish)) {
 	    $ftStop = '--';
 	    $intMinWorked = 0;
 	    $rndMinWorked = 0;
 	} else {
-	    $ftStop = Time_DefaultDate($strWhenFinish,$strWhenStart);
+	    $ftStop = fcTime::DefaultDate($strWhenFinish,$strWhenStart);
 	    // ++ these calculations are now duplicated in TimeSpan_min()
 	    $intWhenStart = strtotime($strWhenStart);
 	    $intWhenStop = strtotime($strWhenFinish);
@@ -1345,15 +1046,22 @@ abstract class SessionCalc {
 	$this->intSeq++;
     }
 }
+// TODO: rename to SessionRecordCalc
 class SessionObjCalc extends SessionCalc {
-    private $objSess;
 
-    public function __construct(clsWFSession $iSess) {
-	$this->objSess = $iSess;
+    public function __construct(wfcSession $rcSess) {
+	$this->Record($rcSess);
 	parent::__construct();
     }
-    protected function Data($iName) {
-	return $this->objSess->Row[$iName];
+    protected function Data($sName) {
+	return $this->Record()->Value($sName);
+    }
+    private $rcSess;
+    protected function Record($rc=NULL) {
+	if (!is_null($rc)) {
+	    $this->rcSess = $rc;
+	}
+	return $this->rcSess;
     }
     /*-----
       USAGE: First call CalcRow() and, if needed, SumRow()
@@ -1368,7 +1076,7 @@ class SessionObjCalc extends SessionCalc {
 	    $arUpd['CostBal']	= $this->dlrBalCalc;
 	    $arUpd['Seq']	= $this->intSeq;
 	}
-	$this->objSess->Update($arUpd);
+	$this->Record()->Update($arUpd);
     }
 }
 class SessionArrCalc extends SessionCalc {

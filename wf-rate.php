@@ -5,12 +5,14 @@
     2013-10-31 split off from WorkFerret.main
 */
 class clsWFRates extends clsTable_key_single {
+    use ftLinkableTable;
+
     public function __construct($iDB) {
 	parent::__construct($iDB);
 	  $this->Name('rate');
 	  $this->KeyName('ID');
 	  $this->ClassSng('clsWFRate');
-	  $this->ActionKey('rate');	// for AdminLink -- used where?
+	  $this->ActionKey('rate');	// for SelfLink -- used where?
     }
     /*----
       HISTORY:
@@ -42,10 +44,8 @@ class clsWFRates extends clsTable_key_single {
 	      'PerHour'	=> SQLValue($dlrHourly)
 	      );
 	    if ($doNew) {
-echo __FILE__.' line '.__LINE__.'<br>';
 		$this->Insert($arRow);
 	    } else {
-echo __FILE__.' line '.__LINE__.'<br>';
 		$this->Update($arRow,'ID='.$id);
 	    }
 	}
@@ -61,16 +61,13 @@ echo __FILE__.' line '.__LINE__.'<br>';
 }
 class clsWFRate extends cDataRecord_MW {
 
-    // ++ BOILERPLATE ++ //
-/* 2015-05-03 hopefully this is redundant now
-    public function AdminLink($iText=NULL,$iPopup=NULL,array $iarArgs=NULL) {
-	return clsAdminData_helper::_AdminLink($this,$iText,$iPopup,$iarArgs);
+    // ++ SELF-LINKAGE AUXILIARY ++ //
+
+    public function SelfLink_name() {
+	return $this->SelfLink($this->Text_forList());
     }
-    public function AdminRedirect(array $iarArgs=NULL) {
-	return clsAdminData_helper::_AdminRedirect($this,$iarArgs);
-    }
-*/
-    // -- BOILERPLATE -- //
+
+    // -- SELF-LINKAGE AUXILIARY -- //
     // ++ STATUS ACCESS ++ //
 
     public function isLineItem() {
@@ -78,10 +75,21 @@ class clsWFRate extends cDataRecord_MW {
 	//return ($bit == chr(1));
 	return BitToBool($bit);
     }
+    /*----
+      RETURNS: TRUE if the rate is quantity-based.
+	If not, session cost will need to be entered manually.
+    */
+    public function IsQtyBased() {
+	return !empty($this->PerUnit());
+    }
 
     // -- STATUS ACCESS -- //
     // ++ DATA FIELD ACCESS ++ //
 
+    // PUBLIC so it can be used in Session lists
+    public function PerUnit() {
+	return $this->Value('PerHour');
+    }
     /*----
       PUBLIC so Project can retrieve description of default rate
     */
@@ -92,13 +100,22 @@ class clsWFRate extends cDataRecord_MW {
 	return $ftAmt.$strName;
     }
     /*----
-      PUBLIC for drop-down control (and, theoretically, other lists)
       DONE AS alias of Descr(), but that could change
+      HISTORY:
+	2015-10-08 Was public, but now only used internally.
     */
-    public function Text_forList() {
+    protected function Text_forList() {
         return $this->Descr();
     }
-
+    /*----
+      CALLBACK for dropdown control
+    */
+    public function ListItem_Text() {
+        return $this->Descr();
+    }
+    public function ListItem_Link() {
+	return $this->SelfLink_name();
+    }
     // -- DATA FIELD ACCESS -- //
     // ++ DATA TABLE ACCESS ++ //
 
@@ -159,7 +176,7 @@ class clsWFRate extends cDataRecord_MW {
 
 	$strDo = $vgPage->Arg('do');
 	$doNew = ($strDo == 'add');
-	$idEdit = $vgPage->Arg('id');
+	$idToEdit = $vgPage->Arg('id');
 	$doEdit = $vgPage->Arg('edit') || (!empty($idEdit));
 	$doAssg = $vgPage->Arg('assign');
 	$doForm = $doNew || $doEdit || $doAssg;
@@ -167,7 +184,6 @@ class clsWFRate extends cDataRecord_MW {
 	$doSaveAssign = $wgRequest->getBool('btnAssign');
 
 	// save variables to pass to DisplayRow()
-	$this->idEdit = $idEdit;
 
 	if ($doSave) {
 	    $intChg = $this->AdminSave();	// save edit
@@ -207,9 +223,10 @@ class clsWFRate extends cDataRecord_MW {
 		$out .= $this->DoEditRow();
 	    }
 
-	    $this->isOdd = FALSE;
+	    $isOdd = FALSE;
 	    while ($this->NextRow()) {
-		$out .= $this->DisplayRow($doAssg);
+		$out .= $this->DisplayRow($doAssg,$idToEdit,$isOdd);
+		$isOdd = !$isOdd;
 	    }
 	    // display new row
 	    $arNew = array(
@@ -221,7 +238,7 @@ class clsWFRate extends cDataRecord_MW {
 	      'isLineItem'	=> TRUE,
 	      );
 	    $this->Values($arNew);
-	    $out .= $this->DisplayRow(FALSE);
+	    $out .= $this->DisplayRow(FALSE,NULL,$isOdd);
 
 	    $out .= "</table>";
 	} else {
@@ -235,31 +252,30 @@ class clsWFRate extends cDataRecord_MW {
 	}
 	$wgOut->AddHTML($out);
     }
-    public function DisplayRow($iDoAssign) {
-	$idEdit = $this->idEdit;
+    public function DisplayRow($doAssign,$idToEdit,$isOdd) {
+	$idEdit = $idToEdit;
 
 	$id = $this->KeyValue();
-	$wtStyle = $this->isOdd?'background:#ffffff;':'background:#eeeeee;';
-	$this->isOdd = !$this->isOdd;
+	$wtStyle = $isOdd?'background:#ffffff;':'background:#eeeeee;';
 	$htTR = "\n<tr style=\"$wtStyle\">";
 
 	//$objProj = $this->ProjectObject();
 
-	$ftID = $this->AdminLink();
+	$ftID = $this->SelfLink();
 	$ftActv = BitToBool($this->Value('isActive'))?'A':'';
 	$ftLItm = BitToBool($this->Value('isLineItem'))?'LI':'';
 /*
 	if ($objProj->IsNew()) {
 	    $ftProj = 'ALL';
 	} else {
-	    $ftProj = $objProj->AdminLink($objProj->Value('Name'));
+	    $ftProj = $objProj->SelfLink($objProj->Value('Name'));
 	}
 */
 	$ftName = $this->Value('Name');
 	$ftPerHr = empty($this->Row['PerHour'])?'-':sprintf('%0.2f',$this->Value('PerHour'));
 
 	$id = $this->Value('ID');
-	$ftProjs = $this->XProjs()->RenderRate($id,$iDoAssign);
+	$ftProjs = $this->XProjs()->RenderRate($id,$doAssign);
 
 	$out = NULL;
 	if ($id == $idEdit) {
